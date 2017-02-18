@@ -116,6 +116,10 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
+int		procinfo(int);
+int		ticketassign(int);
+int		lofork(int);
+int		random(uint);
 
 // swtch.S
 void            swtch(struct context**, struct context*);

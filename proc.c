@@ -10,9 +10,11 @@
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
+  int tpool;
 } ptable;
 
 static struct proc *initproc;
+unsigned long rands = 1;
 
 int nextpid = 1;
 extern void forkret(void);
@@ -49,6 +51,8 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  
+  p->tickets = 10;
 
   release(&ptable.lock);
 
@@ -72,6 +76,10 @@ found:
   p->context = (struct context*)sp;
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
+  
+  p->syscall = 0;
+  p->schedcount = 0;
+  p->isTest = 0;
 
   return p;
 }
@@ -108,6 +116,8 @@ userinit(void)
   // writes to be visible, and the lock is also needed
   // because the assignment might not be atomic.
   acquire(&ptable.lock);
+  
+  ptable.tpool += p->tickets; 
 
   p->state = RUNNABLE;
 
@@ -172,6 +182,8 @@ fork(void)
   pid = np->pid;
 
   acquire(&ptable.lock);
+  
+  ptable.tpool += np->tickets;
 
   np->state = RUNNABLE;
 
@@ -218,7 +230,10 @@ exit(void)
         wakeup1(initproc);
     }
   }
-
+  
+  ptable.tpool -= proc->tickets;
+  p->tickets = 0;
+  
   // Jump into the scheduler, never to return.
   proc->state = ZOMBIE;
   sched();
@@ -251,6 +266,9 @@ wait(void)
         p->parent = 0;
         p->name[0] = 0;
         p->killed = 0;
+        p->syscall = 0;
+        p->schedcount = 0;
+        p->isTest = 0;
         p->state = UNUSED;
         release(&ptable.lock);
         return pid;
@@ -414,7 +432,7 @@ wakeup1(void *chan)
     if(p->state == SLEEPING && p->chan == chan)
       p->state = RUNNABLE;
 }
-
+       
 // Wake up all processes sleeping on chan.
 void
 wakeup(void *chan)
@@ -483,3 +501,122 @@ procdump(void)
     cprintf("\n");
   }
 }
+
+int
+procinfo(int param)
+{
+    struct proc * p;
+    int n=0;
+    if(param<0 || param >3)
+        return -1;
+    if(param == 1){
+        acquire(&ptable.lock);
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+            if(p->state == UNUSED || p->state == EMBRYO) 
+                continue;
+            n++;
+        }
+	release(&ptable.lock);
+	return n;
+    }
+    if(param == 2){
+	return proc->syscall;
+    }
+    if(param == 3){
+	return proc->sz /PGSIZE;
+    }
+    return 0;
+}
+
+int
+lotterytest()
+{
+    struct proc *p;
+    int n=0;
+    acquire(&ptable.lock);
+    cprintf("\nReporter PID: %d\n, Tickets: %d", proc->pid, proc->tickets);
+    cprintf("Running Test Processes\n:");
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+    {
+        if(p->isTest == 1 || p->state != ZOMBIE)
+        {
+            cprintf("PID: %d, Tickets: %d, Running Times: %d", p->pid, p->tickets, p->schedcount);
+            n++;
+        }
+    }
+    if(n == 0)
+        cprintf("None");
+    return 0;
+}
+
+int ticketassign(int t)
+{
+    if(t == 0)
+        return -1;
+    acquire(&ptable.lock);
+    if(proc->tickets == 0)
+        return -1;
+    ptable.tpool += t-proc->tickets;
+    proc->tickets = t;
+    proc->isTest = 1;
+    release(&ptable.lock);
+    return 0;    
+}
+
+int lofork(int t)
+{
+    int i, pid;
+    struct proc *np;
+    
+    // Allocate process.
+    if((np = allocproc()) == 0){
+	return -1;
+    }
+    
+    // Copy process state from p.
+    if((np->pgdir = copyuvm(proc->pgdir, proc->sz)) == 0){
+	kfree(np->kstack);
+	np->kstack = 0;
+	np->state = UNUSED;
+	return -1;
+    }
+    np->sz = proc->sz;
+    np->parent = proc;
+    *np->tf = *proc->tf;
+    
+    // Clear %eax so that fork returns 0 in the child.
+    np->tf->eax = 0;
+    
+    for(i = 0; i < NOFILE; i++)
+	if(proc->ofile[i])
+	    np->ofile[i] = filedup(proc->ofile[i]);
+    np->cwd = idup(proc->cwd);
+    
+    safestrcpy(np->name, proc->name, sizeof(proc->name));
+
+    pid = np->pid;
+    
+    acquire(&ptable.lock);
+    
+    ptable.tpool += t - np->tickets;
+
+    np->tickets = t;
+
+    np->isTest = 1;
+
+    np->state = RUNNABLE;
+
+    release(&ptable.lock);
+
+    return pid;
+    }
+
+int random(uint max)
+{
+    rands = (rands * 48271UL) % 2147483647UL;
+    return (int)(rands % max);
+}
+
+
+            
+

@@ -89,3 +89,33 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+int
+sys_procinfo(void)
+{
+  int n;
+
+  if(argint(0, &n) < 0)
+    return -1;
+  return procinfo(n);
+}
+
+int
+sys_ticketassign(void)
+{
+  int n;
+
+  if(argint(0, &n) < 0)
+    return -1;
+  return ticketassign(n);
+}
+
+int
+sys_lofork(void)
+{
+  int n;
+
+  if(argint(0, &n) < 0)
+    return -1;
+  return lofork(n);
+}

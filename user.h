@@ -23,6 +23,9 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int procinfo(int);
+int ticketassign(int);
+int lofork(int);
 
 // ulib.c
 int stat(char*, struct stat*);
